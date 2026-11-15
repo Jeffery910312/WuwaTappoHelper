@@ -6,13 +6,13 @@ import traceback
 
 def launch():
     try:
-        from startup import ELEVATED_FLAG, ensure_admin
+        from wuwa_helper.startup import ELEVATED_FLAG, ensure_admin
         relaunched = sys.argv[1:2] == [ELEVATED_FLAG]
         if relaunched:
             del sys.argv[1]
         if not ensure_admin(relaunched=relaunched):
             return
-        from main import main
+        from wuwa_helper.main import main
         main()
     except Exception as exc:
         log = Path(__file__).resolve().parent / 'startup.log'

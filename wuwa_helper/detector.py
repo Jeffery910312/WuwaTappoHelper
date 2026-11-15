@@ -1,10 +1,11 @@
 """Offline, multi-scale matching of the observed gold ready-chest icon."""
 from dataclasses import dataclass
-from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image
+
+from .paths import PROJECT_ROOT
 
 
 @dataclass(frozen=True)
@@ -22,7 +23,7 @@ class Match:
 
 class Detector:
     def __init__(self, template_path=None, threshold=0.88, color_error=28):
-        path = template_path or Path(__file__).parent / 'assets/chest_ready.png'
+        path = template_path or PROJECT_ROOT / 'assets/chest_ready.png'
         self.template = np.array(Image.open(path).convert('RGB'))
         self.threshold = threshold
         self.color_error = color_error

@@ -1,9 +1,10 @@
 """Request administrator access before starting the Windows GUI."""
 import ctypes as C
 from ctypes import wintypes as W
-from pathlib import Path
 import subprocess
 import sys
+
+from .paths import PROJECT_ROOT
 
 
 ELEVATED_FLAG = '--wuwa-elevated'
@@ -22,7 +23,7 @@ def ensure_admin(*, relaunched=False):
     shell.ShellExecuteW.argtypes = [W.HWND, W.LPCWSTR, W.LPCWSTR,
                                     W.LPCWSTR, W.LPCWSTR, C.c_int]
     shell.ShellExecuteW.restype = W.HINSTANCE
-    directory = Path(__file__).resolve().parent
+    directory = PROJECT_ROOT
     parameters = subprocess.list2cmdline([
         str(directory / 'Launch.pyw'), ELEVATED_FLAG, *sys.argv[1:],
     ])

@@ -6,9 +6,9 @@ from functools import lru_cache
 import hashlib
 import os
 from pathlib import Path
-import queue
-import threading
 import time
+
+from .paths import PROJECT_ROOT
 
 u32 = C.WinDLL('user32', use_last_error=True)
 k32 = C.WinDLL('kernel32', use_last_error=True)
@@ -39,9 +39,6 @@ signature(u32, 'GetForegroundWindow', [], W.HWND)
 signature(u32, 'OpenInputDesktop', [W.DWORD, W.BOOL, W.DWORD], W.HANDLE)
 signature(u32, 'CloseDesktop', [W.HANDLE], W.BOOL)
 signature(u32, 'GetSystemMetrics', [C.c_int], C.c_int)
-signature(u32, 'RegisterHotKey', [W.HWND, C.c_int, W.UINT, W.UINT], W.BOOL)
-signature(u32, 'UnregisterHotKey', [W.HWND, C.c_int], W.BOOL)
-signature(u32, 'PeekMessageW', [C.POINTER(W.MSG), W.HWND, W.UINT, W.UINT, W.UINT], W.BOOL)
 signature(k32, 'OpenProcess', [W.DWORD, W.BOOL, W.DWORD], W.HANDLE)
 signature(k32, 'CloseHandle', [W.HANDLE], W.BOOL)
 signature(k32, 'CreateMutexW', [C.c_void_p, W.BOOL, W.LPCWSTR], W.HANDLE)
@@ -156,7 +153,7 @@ class InstanceLock:
     """Keep one GUI per project and Windows session while its handle is open."""
 
     def __init__(self, project_dir=None):
-        directory = Path(project_dir) if project_dir is not None else Path(__file__).parent
+        directory = Path(project_dir) if project_dir is not None else PROJECT_ROOT
         normalized = os.path.normcase(str(directory.resolve()))
         digest = hashlib.sha256(normalized.encode('utf-8')).hexdigest()
         self.name = f'Local\\WuwaTappoClicker_{digest}'
@@ -385,8 +382,9 @@ def _post_mouse_message(hwnd, message, buttons, point):
 def click_background(target, x, y, allowed):
     """Post a click to one game window without moving the system cursor.
 
-    True means messages were queued, not that the game accepted the claim.
-    The caller must verify the chest and counter through the screen.
+    False guarantees no button-down was queued. Once it was queued, return True
+    even if paused so the caller retains its pending-claim marker. True does not
+    prove the game accepted the claim; verify the chest and counter on screen.
     """
     if not allowed():
         return False
@@ -412,7 +410,7 @@ def click_background(target, x, y, allowed):
         _post_mouse_message(hwnd, 0x0201, 0x0001, packed)  # WM_LBUTTONDOWN
         down_sent = True
         time.sleep(.06)
-        return bool(allowed())
+        return True
     finally:
         if down_sent:
             # Do not consult allowed() or hit testing for cleanup: pausing or
@@ -422,49 +420,3 @@ def click_background(target, x, y, allowed):
             _post_mouse_message(hwnd, 0x0202, 0, packed)  # WM_LBUTTONUP
 
 
-class Hotkeys:
-    def __init__(self):
-        self.registered = []
-        self.error = None
-        self._messages = queue.Queue()
-        self._closed = threading.Event()
-        self._ready = threading.Event()
-        self._thread = threading.Thread(target=self._run, name='global-hotkeys', daemon=True)
-        self._thread.start()
-        if not self._ready.wait(2):
-            self.close()
-            raise RuntimeError('初始化全域快捷鍵逾時。')
-
-    def _run(self):
-        # Thread-registered hotkeys post WM_HOTKEY to that thread's queue.
-        # Keep it separate from Tk, whose event loop may otherwise consume it.
-        try:
-            for ident, key in ((1, 0x74),):  # F5 only; avoid Wuwa Tappo's F7-F9.
-                if u32.RegisterHotKey(None, ident, 0x4000, key):
-                    self.registered.append(ident)
-            self._ready.set()
-            while not self._closed.is_set():
-                message = W.MSG()
-                while not self._closed.is_set() and u32.PeekMessageW(C.byref(message), None, 0x0312, 0x0312, 1):
-                    self._messages.put(int(message.wParam))
-                self._closed.wait(.01)
-        except Exception as exc:
-            self.error = exc
-        finally:
-            self._ready.set()
-            for ident in self.registered:
-                u32.UnregisterHotKey(None, ident)
-
-    def poll(self):
-        result = []
-        while True:
-            try:
-                result.append(self._messages.get_nowait())
-            except queue.Empty:
-                break
-        return result
-
-    def close(self):
-        self._closed.set()
-        if threading.current_thread() is not self._thread:
-            self._thread.join(timeout=2)

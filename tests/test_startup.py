@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-import startup
+from wuwa_helper import startup
+from wuwa_helper.paths import PROJECT_ROOT
 
 
 class AdminStartupTests(unittest.TestCase):
@@ -40,7 +41,7 @@ class AdminStartupTests(unittest.TestCase):
         directory = Path('D:/測試 空白 & (資料夾)')
         arguments = ['with spaces', 'a"b', 'trailing slash \\', '中文', '']
         executable = 'C:\\Python with spaces\\pythonw.exe'
-        with patch.object(startup, '__file__', str(directory / 'startup.py')), \
+        with patch.object(startup, 'PROJECT_ROOT', directory), \
                 patch.object(sys, 'argv', ['main.py', *arguments]), \
                 patch.object(sys, 'executable', executable):
             self.assertFalse(startup.ensure_admin())
@@ -85,9 +86,9 @@ class AdminStartupTests(unittest.TestCase):
 
 class LauncherTests(unittest.TestCase):
     def setUp(self):
-        self.launch = runpy.run_path(str(Path(__file__).with_name('Launch.pyw')))['launch']
+        self.launch = runpy.run_path(str(PROJECT_ROOT / 'Launch.pyw'))['launch']
         self.app = Mock()
-        self.patch = patch.dict(sys.modules, {'main': SimpleNamespace(main=self.app)})
+        self.patch = patch.dict(sys.modules, {'wuwa_helper.main': SimpleNamespace(main=self.app)})
         self.patch.start()
         self.addCleanup(self.patch.stop)
 

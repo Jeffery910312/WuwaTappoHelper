@@ -1,7 +1,6 @@
 """Read the visible Wuwa Tappo counter using a local Windows OCR engine."""
 import asyncio
 from dataclasses import dataclass
-from pathlib import Path
 import re
 import threading
 import unicodedata
@@ -10,7 +9,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
-from detector import Detector
+from .detector import Detector
+from .paths import PROJECT_ROOT
 
 
 @dataclass(frozen=True)
@@ -78,7 +78,7 @@ class CounterReader:
     def __init__(self, ocr=None, locator=None):
         self.ocr = ocr if ocr is not None else WindowsOCR()
         self.locator = locator if locator is not None else Detector(
-            Path(__file__).parent / 'assets/counter_anchor.png', threshold=.90,
+            PROJECT_ROOT / 'assets/counter_anchor.png', threshold=.90,
             color_error=None)
 
     def read(self, image):
@@ -99,11 +99,22 @@ class CounterReader:
         pale = (rgb[:, :, 0] > 205) & (rgb[:, :, 1] > 200) & (rgb[:, :, 2] > 175)
         if pale.mean() < .55:
             return None
+        # Pet sprites can protrude into the pill above the digits. Their red or
+        # gray pixels must not become letter strokes during grayscale OCR. Keep
+        # only the counter's brown ink, including its darker antialiased edges;
+        # this removes noise, never reconstructs a covered part of a digit.
+        channels = rgb.astype(np.int16)
+        red, green, blue = channels[:, :, 0], channels[:, :, 1], channels[:, :, 2]
+        brown = ((red-green > 12) & (green-blue > 8) & (green > 60)
+                 & (blue < 190) & (red < 225) & (green > red*.38))
+        cleaned = np.full_like(rgb, 255)
+        cleaned[brown] = rgb[brown]
+        cleaned = Image.fromarray(cleaned)
         # Locate the ink rather than scaling the entire mostly-empty pill. The
         # Windows recognizer can return no text for large, sparse numeric lines.
         # Drop components touching the ROI edge: those are rounded pill edges or
         # background pixels, not digits inside the counter.
-        gray_pixels = np.asarray(crop.convert('L'))
+        gray_pixels = np.asarray(cleaned.convert('L'))
         ink = (gray_pixels < 190).astype(np.uint8)
         count, _, stats, _ = cv2.connectedComponentsWithStats(ink, 8)
         letters = []
@@ -117,19 +128,33 @@ class CounterReader:
         left, top = min(b[0] for b in letters), min(b[1] for b in letters)
         right, bottom = max(b[2] for b in letters), max(b[3] for b in letters)
         ink_height = bottom-top
+        # Large foreign marks through the digit body are an occlusion, not
+        # harmless sprite pixels. Do not silently read the remaining digits as
+        # a shorter number after removing a covered glyph.
+        foreign = ((np.asarray(crop.convert('L')) < 190) & ~brown).astype(np.uint8)
+        foreign[:top, :] = 0
+        foreign[bottom:, :] = 0
+        components, _, marks, _ = cv2.connectedComponentsWithStats(foreign, 8)
+        for index in range(1, components):
+            x, y, width, height, area = marks[index]
+            if (x > 0 and x+width < crop.width and height >= ink_height*.6
+                    and width >= max(2, ink_height*.15) and area >= ink_height):
+                return None
         margin = max(2, round(ink_height*.12))
-        tight = crop.crop((max(0, left-margin), max(0, top-margin),
+        tight = cleaned.crop((max(0, left-margin), max(0, top-margin),
                           min(crop.width, right+margin), min(crop.height, bottom+margin)))
         gray = ImageOps.autocontrast(tight.convert('L'))
         binary = Image.fromarray(cv2.threshold(np.asarray(tight.convert('L')), 0, 255,
                                                cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1])
-        scale = 48 / ink_height
+        # A moderate glyph height with generous padding avoids Windows OCR's
+        # empty result for otherwise clean, dense six-digit numeric lines.
+        scale = 32 / ink_height
         values = []
         for variant in (gray, binary):
             enlarged = variant.resize((max(16, round(variant.width*scale)),
                                        max(16, round(variant.height*scale))),
                                       Image.Resampling.LANCZOS)
-            padded = ImageOps.expand(enlarged, border=16, fill='white')
+            padded = ImageOps.expand(enlarged, border=24, fill='white')
             value = parse_number(self.ocr(padded))
             if value is None:
                 return None
