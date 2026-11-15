@@ -6,11 +6,12 @@ A Windows desktop helper for automatic keypresses and chest claiming in WuwaTapp
 
 ## Getting started
 
-1. Install Python 3.11 or later with pip, Tkinter, and the `py` launcher.
-2. Run `Setup.bat` once to install dependencies.
-3. Open WuwaTappo, then run `Start.bat` and allow administrator access.
-4. Enable the features you need and choose a key, rate, and click mode.
-5. Click **Start** to run or **Pause** to stop. Close the window to exit.
+1. Download the latest version from [Releases](https://github.com/Jeffery910312/WuwaTappoHelper/releases) and extract it.
+2. Install Python 3.11 or later with pip, Tkinter, and the `py` launcher.
+3. Run `Setup.bat` once to install dependencies.
+4. Open WuwaTappo, then run `Start.bat` and allow administrator access.
+5. Enable the features you need and choose a key, rate, and click mode.
+6. Click **Start** to run or **Pause** to stop. Close the window to exit.
 
 ## Settings
 

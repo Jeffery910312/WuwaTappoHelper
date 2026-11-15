@@ -6,11 +6,12 @@ Windows 桌面助手，支援 WuwaTappo 自動按鍵與領取寶箱。
 
 ## 使用
 
-1. 安裝 Python 3.11 以上版本，包含 pip、Tkinter 與 `py` 啟動器。
-2. 首次使用執行 `Setup.bat` 安裝套件。
-3. 開啟 WuwaTappo，再執行 `Start.bat`，允許管理員權限。
-4. 開啟需要的功能，選擇按鍵、速度與點擊方式。
-5. 按「開始」執行，「暫停」停止；關閉視窗即可結束。
+1. 從 [Releases](https://github.com/Jeffery910312/WuwaTappoHelper/releases) 下載最新版本並解壓縮。
+2. 安裝 Python 3.11 以上版本，包含 pip、Tkinter 與 `py` 啟動器。
+3. 首次使用執行 `Setup.bat` 安裝套件。
+4. 開啟 WuwaTappo，再執行 `Start.bat`，允許管理員權限。
+5. 開啟需要的功能，選擇按鍵、速度與點擊方式。
+6. 按「開始」執行，「暫停」停止；關閉視窗即可結束。
 
 ## 設定
 
