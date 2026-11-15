@@ -1,6 +1,6 @@
 # WuwaTappo Helper
 
-[English](README.en.md)
+**繁體中文** | [English](./README.en.md)
 
 Windows 桌面助手，支援 WuwaTappo 自動按鍵與領取寶箱。
 

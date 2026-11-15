@@ -3,7 +3,7 @@ import ctypes as C
 from ctypes import wintypes as W
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock, call, patch
+from unittest.mock import Mock, patch
 
 from wuwa_helper import window_style as appearance
 
@@ -97,107 +97,6 @@ class WindowStyleTests(unittest.TestCase):
             self.assertIs(function.restype, C.c_int32)
         finally:
             appearance._load_dwm.cache_clear()
-
-    def frame_api(self, style=0x00040100):
-        return SimpleNamespace(get_style=Mock(return_value=style),
-                               set_style=Mock(return_value=style),
-                               clear_icon=Mock(return_value=0),
-                               refresh=Mock(return_value=True))
-
-    def test_hiding_caption_icon_preserves_all_other_window_styles_and_geometry(self):
-        api = self.frame_api()
-        with patch.object(appearance, '_load_frame_api', return_value=api):
-            self.assertTrue(appearance.hide_caption_icon(self.hwnd))
-        api.get_style.assert_called_once_with(self.hwnd, -20)
-        api.set_style.assert_called_once_with(self.hwnd, -20, 0x00040101)
-        api.clear_icon.assert_has_calls([call(self.hwnd, 0x80, 0, 0),
-                                         call(self.hwnd, 0x80, 1, 0)])
-        # Refresh only the frame: no resize, movement, activation or Z-order change.
-        api.refresh.assert_called_once_with(self.hwnd, None, 0, 0, 0, 0, 0x0037)
-
-    def test_hiding_caption_icon_is_idempotent_for_an_already_styled_frame(self):
-        api = self.frame_api(style=0x00040101)
-        with patch.object(appearance, '_load_frame_api', return_value=api):
-            self.assertTrue(appearance.hide_caption_icon(self.hwnd))
-        api.set_style.assert_not_called()
-        api.clear_icon.assert_has_calls([call(self.hwnd, 0x80, 0, 0),
-                                         call(self.hwnd, 0x80, 1, 0)])
-        api.refresh.assert_called_once_with(self.hwnd, None, 0, 0, 0, 0, 0x0037)
-
-    def test_failed_refresh_can_be_retried_without_rewriting_existing_style(self):
-        api = self.frame_api()
-        api.get_style.side_effect = [0x00040100, 0x00040101]
-        api.refresh.side_effect = [False, True]
-        with patch.object(appearance, '_load_frame_api', return_value=api):
-            self.assertFalse(appearance.hide_caption_icon(self.hwnd))
-            self.assertTrue(appearance.hide_caption_icon(self.hwnd))
-        api.set_style.assert_called_once_with(self.hwnd, -20, 0x00040101)
-        self.assertEqual(api.clear_icon.call_count, 4)
-        self.assertEqual(api.refresh.call_count, 2)
-
-    def test_zero_previous_style_and_zero_set_result_can_be_success(self):
-        api = self.frame_api(style=0)
-        api.set_style.return_value = 0
-        with patch.object(appearance, '_load_frame_api', return_value=api), \
-                patch.object(appearance.C, 'get_last_error', return_value=0):
-            self.assertTrue(appearance.hide_caption_icon(self.hwnd))
-        api.set_style.assert_called_once_with(self.hwnd, -20, 1)
-        api.refresh.assert_called_once()
-
-    def test_failed_style_read_does_not_mutate_anything(self):
-        api = self.frame_api(style=0)
-        with patch.object(appearance, '_load_frame_api', return_value=api), \
-                patch.object(appearance.C, 'get_last_error', return_value=5):
-            self.assertFalse(appearance.hide_caption_icon(self.hwnd))
-        api.set_style.assert_not_called()
-        api.clear_icon.assert_not_called()
-        api.refresh.assert_not_called()
-
-    def test_failed_style_write_does_not_refresh_the_frame(self):
-        api = self.frame_api()
-        api.set_style.return_value = 0
-        with patch.object(appearance, '_load_frame_api', return_value=api), \
-                patch.object(appearance.C, 'get_last_error', return_value=5):
-            self.assertFalse(appearance.hide_caption_icon(self.hwnd))
-        api.clear_icon.assert_not_called()
-        api.refresh.assert_not_called()
-
-    def test_frame_bindings_keep_large_hwnd_and_icon_messages_pointer_safe(self):
-        appearance._load_frame_api.cache_clear()
-        getter, setter, clearer, refresher = Mock(), Mock(), Mock(), Mock()
-        user = SimpleNamespace(GetWindowLongPtrW=getter, SetWindowLongPtrW=setter,
-                               GetWindowLongW=getter, SetWindowLongW=setter,
-                               SendMessageW=clearer, SetWindowPos=refresher)
-        try:
-            with patch.object(appearance.C, 'WinDLL', return_value=user):
-                api = appearance._load_frame_api()
-            self.assertIs(api.get_style, getter)
-            self.assertEqual(getter.argtypes, [W.HWND, C.c_int])
-            self.assertIs(getter.restype, C.c_ssize_t)
-            self.assertEqual(setter.argtypes, [W.HWND, C.c_int, C.c_ssize_t])
-            self.assertIs(setter.restype, C.c_ssize_t)
-            self.assertEqual(clearer.argtypes, [W.HWND, W.UINT, W.WPARAM, W.LPARAM])
-            self.assertIs(clearer.restype, C.c_ssize_t)
-            self.assertEqual(refresher.argtypes,
-                             [W.HWND, W.HWND, C.c_int, C.c_int, C.c_int, C.c_int, W.UINT])
-        finally:
-            appearance._load_frame_api.cache_clear()
-
-    def test_frame_refresh_failure_and_native_exception_return_false(self):
-        api = self.frame_api()
-        api.refresh.return_value = False
-        with patch.object(appearance, '_load_frame_api', return_value=api):
-            self.assertFalse(appearance.hide_caption_icon(self.hwnd))
-        api.get_style.side_effect = OSError('unavailable')
-        with patch.object(appearance, '_load_frame_api', return_value=api):
-            self.assertFalse(appearance.hide_caption_icon(self.hwnd))
-
-    def test_missing_frame_api_or_zero_handle_returns_false(self):
-        with patch.object(appearance, '_load_frame_api', return_value=None):
-            self.assertFalse(appearance.hide_caption_icon(self.hwnd))
-        with patch.object(appearance, '_load_frame_api') as loader:
-            self.assertFalse(appearance.hide_caption_icon(0))
-        loader.assert_not_called()
 
 
 if __name__ == '__main__':

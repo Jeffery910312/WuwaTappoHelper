@@ -8,7 +8,6 @@ import ctypes as C
 from ctypes import wintypes as W
 from functools import lru_cache
 import re
-from types import SimpleNamespace
 
 
 DWMWA_USE_IMMERSIVE_DARK_MODE = 20
@@ -18,11 +17,6 @@ DWMWA_CAPTION_COLOR = 35
 DWMWA_TEXT_COLOR = 36
 DWMWCP_ROUND = 2
 GA_ROOT = 2
-GWL_EXSTYLE = -20
-WS_EX_DLGMODALFRAME = 0x00000001
-FRAME_REFRESH = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020
-WM_SETICON = 0x0080
-ICON_SMALL, ICON_BIG = 0, 1
 
 
 def set_app_identity():
@@ -77,62 +71,6 @@ def get_frame_handle(widget_hwnd):
         return int(ancestor(widget_hwnd, GA_ROOT) or 0)
     except OSError:
         return 0
-
-
-@lru_cache(maxsize=1)
-def _load_frame_api():
-    try:
-        user = C.WinDLL('user32', use_last_error=True)
-        suffix = 'PtrW' if C.sizeof(C.c_void_p) == 8 else 'W'
-        get_style = getattr(user, 'GetWindowLong' + suffix)
-        get_style.argtypes, get_style.restype = [W.HWND, C.c_int], C.c_ssize_t
-        set_style = getattr(user, 'SetWindowLong' + suffix)
-        set_style.argtypes = [W.HWND, C.c_int, C.c_ssize_t]
-        set_style.restype = C.c_ssize_t
-        refresh = user.SetWindowPos
-        refresh.argtypes = [W.HWND, W.HWND, C.c_int, C.c_int, C.c_int, C.c_int, W.UINT]
-        refresh.restype = W.BOOL
-        clear_icon = user.SendMessageW
-        clear_icon.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
-        clear_icon.restype = C.c_ssize_t
-        return SimpleNamespace(get_style=get_style, set_style=set_style,
-                               clear_icon=clear_icon, refresh=refresh)
-    except (AttributeError, OSError):
-        return None
-
-
-def hide_caption_icon(hwnd):
-    """Remove the native system-menu icon without changing resize/button styles.
-
-    A dialog-style caption omits the icon. Unlike a transparent HICON, it has
-    no bitmap for Windows to render as an opaque square. This changes only
-    this window's extended style and leaves its regular styles untouched.
-    """
-    if not hwnd:
-        return False
-    api = _load_frame_api()
-    if api is None:
-        return False
-    try:
-        C.set_last_error(0)
-        previous = api.get_style(hwnd, GWL_EXSTYLE)
-        if previous == 0 and C.get_last_error():
-            return False
-        updated = previous | WS_EX_DLGMODALFRAME
-        if updated != previous:
-            C.set_last_error(0)
-            result = api.set_style(hwnd, GWL_EXSTYLE, updated)
-            if result == 0 and C.get_last_error():
-                return False
-        # Clear Tk's per-window icons as well as suppressing the caption icon.
-        # Do not destroy the returned handles: Tk retains ownership of them.
-        api.clear_icon(hwnd, WM_SETICON, ICON_SMALL, 0)
-        api.clear_icon(hwnd, WM_SETICON, ICON_BIG, 0)
-        # FRAMECHANGED refreshes cached non-client styling; the other flags
-        # keep size, location, stacking and foreground focus unchanged.
-        return bool(api.refresh(hwnd, None, 0, 0, 0, 0, FRAME_REFRESH))
-    except OSError:
-        return False
 
 
 def apply_window_style(hwnd, *, dark, caption_color, border_color, text_color):

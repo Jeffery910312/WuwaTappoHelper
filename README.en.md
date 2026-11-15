@@ -1,6 +1,6 @@
 # WuwaTappo Helper
 
-[繁體中文](ReadMe.md)
+[繁體中文](./ReadMe.md) | **English**
 
 A Windows desktop helper for automatic keypresses and chest claiming in WuwaTappo.
 
