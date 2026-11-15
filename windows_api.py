@@ -30,6 +30,8 @@ signature(u32, 'IsWindowVisible', [W.HWND], W.BOOL)
 signature(u32, 'IsIconic', [W.HWND], W.BOOL)
 signature(u32, 'GetAncestor', [W.HWND, W.UINT], W.HWND)
 signature(u32, 'WindowFromPoint', [W.POINT], W.HWND)
+signature(u32, 'ScreenToClient', [W.HWND, C.POINTER(W.POINT)], W.BOOL)
+signature(u32, 'PostMessageW', [W.HWND, W.UINT, W.WPARAM, W.LPARAM], W.BOOL)
 signature(u32, 'GetCursorPos', [C.POINTER(W.POINT)], W.BOOL)
 signature(u32, 'SetCursorPos', [C.c_int, C.c_int], W.BOOL)
 signature(u32, 'GetAsyncKeyState', [C.c_int], C.c_short)
@@ -343,6 +345,81 @@ def click(target, x, y, allowed):
         position = cursor()
         if abs(position[0]-x) <= 1 and abs(position[1]-y) <= 1:
             u32.SetCursorPos(*before)
+
+
+def _background_recipient(target, x, y):
+    """Resolve only the exposed game input window; never activate it."""
+    if not owns_point(target, x, y):
+        return None
+    hwnd = u32.WindowFromPoint(W.POINT(x, y))
+    root = u32.GetAncestor(hwnd, 2) if hwnd else 0
+    if (not root or (root != target.hwnd and title(root) != 'DesktopCatInput')
+            or identity(root) != (target.pid, 'wuwatappo.exe')
+            or identity(hwnd) != (target.pid, 'wuwatappo.exe')):
+        return None
+    pid = W.DWORD()
+    thread = u32.GetWindowThreadProcessId(hwnd, C.byref(pid))
+    if not thread or pid.value != target.pid:
+        return None
+    return hwnd, root, thread
+
+
+def _same_background_recipient(target, recipient):
+    """A release stays addressed to the original process and input surface."""
+    hwnd, root, thread = recipient
+    pid = W.DWORD()
+    return (u32.GetWindowThreadProcessId(hwnd, C.byref(pid)) == thread
+            and pid.value == target.pid
+            and identity(hwnd) == (target.pid, 'wuwatappo.exe')
+            and u32.GetAncestor(hwnd, 2) == root
+            and identity(root) == (target.pid, 'wuwatappo.exe')
+            and (root == target.hwnd or title(root) == 'DesktopCatInput'))
+
+
+def _post_mouse_message(hwnd, message, buttons, point):
+    if not u32.PostMessageW(hwnd, message, buttons, point):
+        error = C.get_last_error()
+        raise RuntimeError(f'Windows 拒絕背景滑鼠訊息（錯誤 {error}），自動領箱已暫停。')
+
+
+def click_background(target, x, y, allowed):
+    """Post a click to one game window without moving the system cursor.
+
+    True means messages were queued, not that the game accepted the claim.
+    The caller must verify the chest and counter through the screen.
+    """
+    if not allowed():
+        return False
+    ensure_input_access(target)
+    recipient = _background_recipient(target, x, y)
+    if recipient is None:
+        return False
+    hwnd, _, _ = recipient
+    point = W.POINT(x, y)
+    if not u32.ScreenToClient(hwnd, C.byref(point)):
+        raise RuntimeError('無法換算背景點擊座標，自動領箱已暫停。')
+    if not (-32768 <= point.x <= 32767 and -32768 <= point.y <= 32767):
+        raise RuntimeError('背景點擊座標超出 Windows 訊息範圍，自動領箱已暫停。')
+    packed = (point.x & 0xffff) | ((point.y & 0xffff) << 16)
+    if not allowed() or _background_recipient(target, x, y) != recipient:
+        return False
+    _post_mouse_message(hwnd, 0x0200, 0, packed)  # WM_MOUSEMOVE
+    # Cancellation or an overlay change after hover must not become a click.
+    if not allowed() or _background_recipient(target, x, y) != recipient:
+        return False
+    down_sent = False
+    try:
+        _post_mouse_message(hwnd, 0x0201, 0x0001, packed)  # WM_LBUTTONDOWN
+        down_sent = True
+        time.sleep(.06)
+        return bool(allowed())
+    finally:
+        if down_sent:
+            # Do not consult allowed() or hit testing for cleanup: pausing or
+            # covering the chest must still release the original game window.
+            if not _same_background_recipient(target, recipient):
+                raise RuntimeError('背景輸入視窗已變更，無法確認點擊結果，自動領箱已暫停。')
+            _post_mouse_message(hwnd, 0x0202, 0, packed)  # WM_LBUTTONUP
 
 
 class Hotkeys:
