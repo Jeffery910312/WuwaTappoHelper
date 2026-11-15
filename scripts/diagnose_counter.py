@@ -1,6 +1,7 @@
 """Read-only counter diagnostics; never sends keyboard or mouse input."""
 from pathlib import Path
 import sys
+import argparse
 import traceback
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -8,19 +9,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PIL import Image
 
 from wuwa_helper.capture import grab_region
+from wuwa_helper.window_capture import WindowGrabber
 from wuwa_helper.counter_reader import CounterReader, WindowsOCR
 from wuwa_helper import windows_api as api
 from wuwa_helper.paths import PROJECT_ROOT
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--backend', choices=('window', 'screen'), default='window')
+    args = parser.parse_args()
     output = PROJECT_ROOT / 'diagnostics'
     output.mkdir(exist_ok=True)
     targets = api.targets()
     if len(targets) != 1:
         raise RuntimeError(f'Expected one game window, got {len(targets)}')
     target = targets[0]
-    image = grab_region(target.rect)
+    print('backend', args.backend, flush=True)
+    image = (WindowGrabber().grab(target, target.rect) if args.backend == 'window'
+             else grab_region(target.rect))
     ocr = WindowsOCR()
 
     def trace_ocr(variant):
@@ -36,13 +43,13 @@ def main():
         roi = (max(0, round(anchor.x-145*sx)), max(0, round(anchor.y-16*sy)),
                min(image.width, round(anchor.x+65*sx)), min(image.height, round(anchor.y+48*sy)))
         crop = image.crop(roi)
-        crop.save(output / f'counter_probe_{index}.png')
+        crop.save(output / f'{args.backend}_counter_probe_{index}.png')
         print('local', roi, 'anchors', reader.locator.find(crop), flush=True)
         try:
-            print('local_reading', reader.read(crop), flush=True)
+            print('local_reading', reader.read(crop), 'reason', reader.last_issue, flush=True)
         except Exception:
             traceback.print_exc()
-    print('full_reading', reader.read(image), flush=True)
+    print('full_reading', reader.read(image), 'reason', reader.last_issue, flush=True)
 
 
 if __name__ == '__main__':

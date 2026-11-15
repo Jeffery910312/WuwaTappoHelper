@@ -32,9 +32,10 @@ class Engine:
             from .counter_reader import CounterReader
             reader = CounterReader()
         self.reader = reader
+        self.window_capture = None
         if grab is None:
-            from .capture import grab_region
-            grab = grab_region
+            from .window_capture import WindowGrabber
+            self.window_capture = WindowGrabber()
         self.grab = grab
         if monitor is None:
             from .input_monitor import InputMonitor
@@ -81,6 +82,9 @@ class Engine:
         self.counter_read_at = 0.0
         self.stalled_keys = 0
         self.read_failures = 0
+        self.counter_issue = None
+        self._reading_inputs = None
+        self._counter_warning_at = 0.0
         try:
             saved = json.loads(self.state_path.read_text(encoding='utf-8'))
             if not isinstance(saved, dict):
@@ -154,15 +158,24 @@ class Engine:
         self.count_base = max(0, self.count_base + delta - 1000)
         self.counter_inputs = total
 
+    def capture_target(self, target, rect):
+        if self.window_capture is not None:
+            return self.window_capture.grab(target, rect)
+        return self.grab(rect)
+
     def counter_capture(self, target):
         region = self.counter_region if self.region_target == target.rect else None
         left, top = (region[0], region[1]) if region else (0, 0)
         rect = (target.rect[0]+region[0], target.rect[1]+region[1],
                 target.rect[0]+region[2], target.rect[1]+region[3]) if region else target.rect
-        reading = self.reader.read(self.grab(rect))
+        image = self.capture_target(target, rect)
+        self._reading_inputs = self.monitor.snapshot()['total']
+        reading = self.reader.read(image)
         if reading is None and region:
             # The pet may have moved: relocate inside its own window only.
-            reading = self.reader.read(self.grab(target.rect))
+            image = self.capture_target(target, target.rect)
+            self._reading_inputs = self.monitor.snapshot()['total']
+            reading = self.reader.read(image)
             left = top = 0
         if reading is not None and hasattr(reading, 'rect'):
             x1, y1, x2, y2 = reading.rect
@@ -183,11 +196,11 @@ class Engine:
             width, height = target.rect[2]-target.rect[0], target.rect[3]-target.rect[1]
             left, top = max(0, round(x1-70*scale)), max(0, round(y1-180*scale))
             right, bottom = min(width, round(x2+40*scale)), min(height, round(y2+20*scale))
-            matches = matcher.find(self.grab((target.rect[0]+left, target.rect[1]+top,
+            matches = matcher.find(self.capture_target(target, (target.rect[0]+left, target.rect[1]+top,
                                                   target.rect[0]+right, target.rect[1]+bottom)))
             from .detector import Match
             return [Match(m.x+left, m.y+top, m.width, m.height, m.score) for m in matches]
-        return matcher.find(self.grab(target.rect))
+        return matcher.find(self.capture_target(target, target.rect))
 
     def observe_counter(self, target=None, force=False):
         now = time.monotonic()
@@ -203,23 +216,34 @@ class Engine:
                 return
             target = windows[0]
         inputs = self.monitor.snapshot()['total']
+        self._reading_inputs = None
         try:
             reading = self.counter_capture(target)
-        except Exception:
+        except Exception as exc:
             reading = None
+            issue = f'{type(exc).__name__}: {exc}'
+        else:
+            issue = getattr(self.reader, 'last_issue', None)
+            if not isinstance(issue, str):
+                issue = 'Counter image could not be read.'
         if reading is None:
+            self.counter_issue = issue
+            if now >= self._counter_warning_at:
+                logging.warning('Counter calibration unavailable: %s', issue)
+                self._counter_warning_at = now + 30
             self.read_failures += 1
             self.next_read = now + min(10, 2 * self.read_failures)
             if self.allowed():
                 self.emit('OCR 暫時無法校正，保留輸入估算並稍後重試；寶箱仍依畫面確認。')
             return
+        self.counter_issue = None
         value = reading.value
         if self.game_count is not None and value != self.game_count:
             self.stalled_keys = 0
         self.game_count = value
         self.count_base = value
-        self.counter_inputs = inputs
-        self.counter_read_at = now
+        self.counter_inputs = self._reading_inputs if self._reading_inputs is not None else inputs
+        self.counter_read_at = time.monotonic()
         if self.read_failures and self.allowed():
             self.emit('OCR 校正已恢復，已更新輸入估算。')
         self.read_failures = 0
@@ -684,7 +708,7 @@ def gui():
     language_button = ttk.Button(header, text='EN' if language.get() == 'zh-TW' else '中', width=3,
                                  takefocus=True, command=lambda: language_changed(), style='Language.TButton')
     language_button.grid(row=0, column=3, sticky='e', padx=(6, 0))
-    count_value = tk.StringVar(value='0')
+    count_value = tk.StringVar(value=tr(language.get(), 'count_initializing'))
     goal = tk.StringVar()
     cooldown = tk.StringVar()
     confirmed = tk.StringVar()
@@ -924,7 +948,8 @@ def gui():
         badge.configure(style=f'{badge_style}.Badge.TLabel')
         toggle.configure(text=tr(code, 'pause' if running else 'start'))
         estimate = engine.estimated_count
-        count_value.set(f'{estimate:,}')
+        count_value.set(f'{estimate:,}' if engine.game_count is not None or estimate
+                        else tr(code, 'count_initializing'))
         goal.set(tr(code, 'goal', count=engine.required_count))
         bar.configure(maximum=max(1, engine.required_count), value=min(estimate or 0, engine.required_count))
         remaining = max(0, int(engine.next_scan-time.time()+.999))

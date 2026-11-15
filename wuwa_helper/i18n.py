@@ -7,6 +7,7 @@ LANGUAGES = ('zh-TW', 'en')
 _TEXT = {
     'zh-TW': {
         'app_title': 'WuwaTappo 助手',
+        'count_initializing': '讀取中',
         'primary_count': '主要點擊數',
         'goal': '領箱門檻 {count:,} 次',
         'cooldown': '冷卻 {timer}',
@@ -41,6 +42,7 @@ _TEXT = {
     },
     'en': {
         'app_title': 'WuwaTappo Helper',
+        'count_initializing': 'Reading...',
         'primary_count': 'Click count',
         'goal': 'Claim threshold {count:,}',
         'cooldown': 'Cooldown {timer}',

@@ -76,29 +76,35 @@ class WindowsOCR:
 class CounterReader:
     """Locate the star/menu anchor, then require two OCR variants to agree."""
     def __init__(self, ocr=None, locator=None):
+        self.last_issue = None
         self.ocr = ocr if ocr is not None else WindowsOCR()
         self.locator = locator if locator is not None else Detector(
             PROJECT_ROOT / 'assets/counter_anchor.png', threshold=.90,
             color_error=None)
 
+    def _unreadable(self, reason):
+        self.last_issue = reason
+        return None
+
     def read(self, image):
+        self.last_issue = None
         image = image.convert('RGB')
         anchors = self.locator.find(image)
         if len(anchors) != 1:
-            return None
+            return self._unreadable(f'Expected one counter anchor; found {len(anchors)}.')
         anchor = anchors[0]
         sx, sy = anchor.width / 51, anchor.height / 34
         # Reference anchor starts at (1604, 484); digits occupy the pill to its left.
         rect = (round(anchor.x - 116*sx), round(anchor.y + 4*sy),
                 round(anchor.x - 8*sx), round(anchor.y + 30*sy))
         if rect[0] < 0 or rect[1] < 0 or rect[2] > image.width or rect[3] > image.height:
-            return None
+            return self._unreadable('Counter crop extends outside the captured image.')
         crop = image.crop(rect)
         rgb = np.asarray(crop)
         # Counter background is pale cream; reject a covered/transparent panel.
         pale = (rgb[:, :, 0] > 205) & (rgb[:, :, 1] > 200) & (rgb[:, :, 2] > 175)
         if pale.mean() < .55:
-            return None
+            return self._unreadable('Counter panel is covered or too transparent.')
         # Pet sprites can protrude into the pill above the digits. Their red or
         # gray pixels must not become letter strokes during grayscale OCR. Keep
         # only the counter's brown ink, including its darker antialiased edges;
@@ -124,7 +130,7 @@ class CounterReader:
                     and height >= max(5, crop.height*.20) and area >= 5):
                 letters.append((x, y, x+width, y+height))
         if not letters:
-            return None
+            return self._unreadable('No counter digit components found.')
         left, top = min(b[0] for b in letters), min(b[1] for b in letters)
         right, bottom = max(b[2] for b in letters), max(b[3] for b in letters)
         ink_height = bottom-top
@@ -139,7 +145,7 @@ class CounterReader:
             x, y, width, height, area = marks[index]
             if (x > 0 and x+width < crop.width and height >= ink_height*.6
                     and width >= max(2, ink_height*.15) and area >= ink_height):
-                return None
+                return self._unreadable('Foreign pixels obscure the counter digits.')
         margin = max(2, round(ink_height*.12))
         tight = cleaned.crop((max(0, left-margin), max(0, top-margin),
                           min(crop.width, right+margin), min(crop.height, bottom+margin)))
@@ -155,10 +161,11 @@ class CounterReader:
                                        max(16, round(variant.height*scale))),
                                       Image.Resampling.LANCZOS)
             padded = ImageOps.expand(enlarged, border=24, fill='white')
-            value = parse_number(self.ocr(padded))
+            raw_text = self.ocr(padded)
+            value = parse_number(raw_text)
             if value is None:
-                return None
+                return self._unreadable(f'OCR returned non-numeric text: {raw_text[:80]!r}.')
             values.append(value)
         if values[0] != values[1]:
-            return None
+            return self._unreadable(f'OCR variants disagree: {values[0]} versus {values[1]}.')
         return CounterReading(values[0], rect)
