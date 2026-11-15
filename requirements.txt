@@ -1,0 +1,8 @@
+numpy>=2,<3
+opencv-python-headless>=4.10,<6
+Pillow>=11,<13
+winrt-Windows.Media.Ocr
+winrt-Windows.Graphics.Imaging
+winrt-Windows.Storage.Streams
+winrt-Windows.Globalization
+
