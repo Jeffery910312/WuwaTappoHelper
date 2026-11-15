@@ -1,4 +1,4 @@
-# WuwaTappo Helper
+﻿# WuwaTappo Helper
 
 **繁體中文** | [English](./README.en.md)
 
@@ -26,4 +26,4 @@ Windows 桌面助手，支援 WuwaTappo 自動按鍵與領取寶箱。
 - 主要點擊數由輸入累積，並以 OCR 定期校正；首次校正前可能顯示「讀取中」。
 - 設定、領箱進度與冷卻保存在 `runtime.json`。
 
-啟動失敗請查看 `startup.log`；執行或辨識問題請查看 `clicker.log`。
+

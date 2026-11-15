@@ -26,4 +26,4 @@ A Windows desktop helper for automatic keypresses and chest claiming in WuwaTapp
 - The main click count tracks input events and is periodically calibrated by OCR. It may show **Reading...** before the first calibration.
 - Settings, claim progress, and cooldown are saved in `runtime.json`.
 
-For startup errors, check `startup.log`. For runtime or recognition issues, check `clicker.log`.
+
